@@ -133,14 +133,31 @@ def whether_orbit(video_path, camera):
     if len(scene_list)!=0:
         end_frame = int(scene_list[0][1].get_frames())
     video_reader = decord.VideoReader(video_path)
-    video = video_reader.get_batch(range(len(video_reader))) 
+    total_frames = len(video_reader)
+    # Subsample frames to avoid OOM in CoTracker (processes all frames at once)
+    max_frames = 128
+    if total_frames > max_frames:
+        indices = np.linspace(0, total_frames - 1, max_frames, dtype=int).tolist()
+    else:
+        indices = list(range(total_frames))
+    video = video_reader.get_batch(indices)
     frame_count, height, width = video.shape[0], video.shape[1], video.shape[2]
-    video = video.permute(0, 3, 1, 2)[None].float().cuda() # B T C H W
+    # Downscale large videos to avoid OOM when loading all frames onto GPU
+    max_dim = 480
+    if height > max_dim or width > max_dim:
+        scale = max_dim / max(height, width)
+        new_h, new_w = int(height * scale), int(width * scale)
+        # video is T H W C torch tensor; resize via interpolation
+        video_perm = video.permute(0, 3, 1, 2).float()  # T C H W
+        video_perm = torch.nn.functional.interpolate(video_perm, size=(new_h, new_w), mode='bilinear', align_corners=False)
+        video = video_perm[None].cuda()  # B T C H W
+    else:
+        video = video.permute(0, 3, 1, 2)[None].float().cuda() # B T C H W
     cap = cv2.VideoCapture(video_path)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     predict_results = camera.predict(video, fps, end_frame)
     flag = label in predict_results
-    return flag, end_frame, frame_count
+    return flag, end_frame, total_frames
     
 class DynamicDegree:
     def __init__(self, args, device):
@@ -245,6 +262,8 @@ def multi_view_consistency(prompt_dict_ls, camera, dynamic):
             if score!=-1:
                 final_score+=score
                 valid_num+=1
+    if valid_num == 0:
+        return 0, processed_json
     return final_score/valid_num, processed_json
             
 def compute_multi_view_consistency(json_dir, device, submodules_dict, **kwargs):
@@ -261,5 +280,8 @@ def compute_multi_view_consistency(json_dir, device, submodules_dict, **kwargs):
         if d['video_results']!=-1:
             num+=1
             score+= d['video_results']
-    all_results = score/num
+    if num == 0:
+        all_results = 0
+    else:
+        all_results = score/num
     return all_results, video_results

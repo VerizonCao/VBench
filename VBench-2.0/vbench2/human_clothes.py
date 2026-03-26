@@ -34,7 +34,13 @@ def load_video(video_path, max_frames_num,fps=1,force_sample=False):
         frame_idx = uniform_sampled_frames.tolist()
         frame_time = [i/vr.get_avg_fps() for i in frame_idx]
     frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
-    spare_frames = vr.get_batch(frame_idx).asnumpy()
+    batch = vr.get_batch(frame_idx)
+    # Handle both native decord NDArray (.asnumpy()) and torch Tensor (.numpy())
+    # depending on whether decord bridge is set to 'native' or 'torch'
+    if hasattr(batch, 'asnumpy'):
+        spare_frames = batch.asnumpy()
+    else:
+        spare_frames = batch.cpu().numpy()
     return spare_frames,frame_time,video_time
 
 
@@ -95,6 +101,8 @@ def LLaVA_Video(prompt_dict_ls, model, tokenizer, image_processor, device):
             valid_num+=1
 
             processed_json.append(new_item)
+    if valid_num == 0:
+        return 0, processed_json
     return final_score/valid_num, processed_json
         
         
@@ -117,5 +125,8 @@ def compute_human_clothes(json_dir, device, submodules_dict, **kwargs):
         if d['video_results']!=-1:
             num+=1
             score+= d['video_results']
-    all_results = score/num
+    if num == 0:
+        all_results = 0
+    else:
+        all_results = score/num
     return all_results, video_results

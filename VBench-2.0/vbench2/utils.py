@@ -126,7 +126,10 @@ def load_video(video_path, data_transform=None, num_frames=None, return_tensor=T
             num_frames, len(video_reader), sample="middle"
             )
         frames = video_reader.get_batch(frame_indices)  # (T, H, W, C), torch.uint8
-        buffer = frames.asnumpy().astype(np.uint8)
+        if hasattr(frames, 'asnumpy'):
+            buffer = frames.asnumpy().astype(np.uint8)
+        else:
+            buffer = frames.cpu().numpy().astype(np.uint8)
     else:
         raise NotImplementedError
     

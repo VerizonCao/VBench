@@ -218,9 +218,25 @@ def camera_motion(prompt_dict_ls, camera):
             if len(scene_list)!=0:
                 end_frame = int(scene_list[0][1].get_frames())
             video_reader = decord.VideoReader(video_path)
-            video = video_reader.get_batch(range(len(video_reader))) 
+            total_frames = len(video_reader)
+            # Subsample frames to avoid OOM in CoTracker (processes all frames at once)
+            max_frames = 128
+            if total_frames > max_frames:
+                indices = np.linspace(0, total_frames - 1, max_frames, dtype=int).tolist()
+            else:
+                indices = list(range(total_frames))
+            video = video_reader.get_batch(indices)
             frame_count, height, width = video.shape[0], video.shape[1], video.shape[2]
-            video = video.permute(0, 3, 1, 2)[None].float().cuda() # B T C H W
+            # Downscale large videos to avoid OOM when loading all frames onto GPU
+            max_dim = 480
+            if height > max_dim or width > max_dim:
+                scale = max_dim / max(height, width)
+                new_h, new_w = int(height * scale), int(width * scale)
+                video_perm = video.permute(0, 3, 1, 2).float()  # T C H W
+                video_perm = torch.nn.functional.interpolate(video_perm, size=(new_h, new_w), mode='bilinear', align_corners=False)
+                video = video_perm[None].cuda()  # B T C H W
+            else:
+                video = video.permute(0, 3, 1, 2)[None].float().cuda() # B T C H W
             cap = cv2.VideoCapture(video_path)
             fps = int(cap.get(cv2.CAP_PROP_FPS))
             predict_results = camera.predict(video, fps, end_frame)

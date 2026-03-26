@@ -33,7 +33,11 @@ def load_video(video_path, max_frames_num, fps=1, force_sample=False):
         frame_idx = uniform_sampled_frames.tolist()
         frame_time = [i/vr.get_avg_fps() for i in frame_idx]
     frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
-    spare_frames = vr.get_batch(frame_idx).asnumpy()
+    batch = vr.get_batch(frame_idx)
+    if hasattr(batch, 'asnumpy'):
+        spare_frames = batch.asnumpy()
+    else:
+        spare_frames = batch.cpu().numpy()
     return spare_frames,frame_time,video_time
 
 def LLaVA_Video(prompt_dict_ls, model, tokenizer, image_processor, device):

@@ -197,3 +197,8 @@ VBench-2.0/scripts/temp.py
 
 # documentations
 README-pypi.md
+
+# ads evaluation data & results
+ads_data/
+ads_material_update_3_24/
+VBench-2.0/output/

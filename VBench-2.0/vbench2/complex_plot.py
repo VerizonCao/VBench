@@ -84,7 +84,11 @@ def load_video(video_path, max_frames_num,fps=1,force_sample=False):
         frame_idx = uniform_sampled_frames.tolist()
         frame_time = [i/vr.get_avg_fps() for i in frame_idx]
     frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
-    spare_frames = vr.get_batch(frame_idx).asnumpy()
+    batch = vr.get_batch(frame_idx)
+    if hasattr(batch, 'asnumpy'):
+        spare_frames = batch.asnumpy()
+    else:
+        spare_frames = batch.cpu().numpy()
     return spare_frames,frame_time,video_time
 
 def LLaVA_Video(prompt_dict_ls, llava_model, llava_tokenizer, image_processor, qwen_model, qwen_tokenizer, device):
@@ -197,25 +201,33 @@ def compute_complex_plot(json_dir, device, submodules_dict, **kwargs):
         llava_tokenizer, llava_model, image_processor, max_length = load_pretrained_model(pretrained, None, model_name, torch_dtype="bfloat16", device_map=device_map)  # Add any other thing you want to pass in llava_model_args
     llava_model.eval()
     
-    try:
-        qwen_model_name = submodules_dict['qwen']
-        qwen_model = AutoModelForCausalLM.from_pretrained(
-            qwen_model_name,
-            torch_dtype="auto",
-            device_map="auto",
-            cache_dir=submodules_dict['qwen']
-        )
-        qwen_tokenizer = AutoTokenizer.from_pretrained(qwen_model_name, cache_dir=submodules_dict['qwen'])
-    except:
-        qwen_model_name = 'Qwen/Qwen2.5-7B-Instruct'
-        qwen_model = AutoModelForCausalLM.from_pretrained(
-            qwen_model_name,
-            torch_dtype="auto",
-            device_map="auto",
-            cache_dir=submodules_dict['qwen']
-        )
-        qwen_tokenizer = AutoTokenizer.from_pretrained(qwen_model_name, cache_dir=submodules_dict['qwen'])
-        
+    # Use OpenRouter API if key is available (saves ~14GB VRAM vs local Qwen2.5)
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if openrouter_key:
+        from vbench2.openrouter_qwen import OpenRouterTokenizer, OpenRouterModel
+        qwen_tokenizer = OpenRouterTokenizer()
+        qwen_model = OpenRouterModel(api_key=openrouter_key)
+        print("Using OpenRouter API for Qwen2.5 judge")
+    else:
+        try:
+            qwen_model_name = submodules_dict['qwen']
+            qwen_model = AutoModelForCausalLM.from_pretrained(
+                qwen_model_name,
+                torch_dtype="auto",
+                device_map="auto",
+                cache_dir=submodules_dict['qwen']
+            )
+            qwen_tokenizer = AutoTokenizer.from_pretrained(qwen_model_name, cache_dir=submodules_dict['qwen'])
+        except:
+            qwen_model_name = 'Qwen/Qwen2.5-7B-Instruct'
+            qwen_model = AutoModelForCausalLM.from_pretrained(
+                qwen_model_name,
+                torch_dtype="auto",
+                device_map="auto",
+                cache_dir=submodules_dict['qwen']
+            )
+            qwen_tokenizer = AutoTokenizer.from_pretrained(qwen_model_name, cache_dir=submodules_dict['qwen'])
+
     all_results, video_results = LLaVA_Video(prompt_dict_ls, llava_model, llava_tokenizer, image_processor, qwen_model, qwen_tokenizer, device)
     all_results = sum([d['video_results'] for d in video_results]) / len(video_results)
     return all_results, video_results
